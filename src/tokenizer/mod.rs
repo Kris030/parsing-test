@@ -5,7 +5,7 @@ use crate::Diagnostic;
 use super::Source;
 pub use token::{TokenType as Ty, *};
 
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug, Clone, Copy, thiserror::Error)]
 pub enum TokenizerError {
     #[error("Unfinished string literal")]
     UnfinishedString,
@@ -32,6 +32,9 @@ pub struct Tokenizer<'n, 's, 'd, D> {
     column: usize,
 
     diagnostics: &'d mut D,
+
+    pub emit_whitespace: bool,
+    pub emit_comments: bool,
 }
 
 impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
@@ -48,6 +51,9 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
             column: 1,
 
             diagnostics,
+
+            emit_comments: false,
+            emit_whitespace: false,
         }
     }
 
@@ -97,29 +103,30 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
     }
 
     fn consume(&mut self) {
+        for p in self.pos..=usize::min(self.lookahead, self.source.bin.len() - 1) {
+            if self.source.bin[p] == b'\n' {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
+        }
+
         self.pos = self.lookahead;
         self.done = self.pos >= self.source.bin.len();
         self.lookahead += 1;
     }
 
     fn number(&mut self, first_char: u8) -> NumberLiteral {
-        let mut v = vec![first_char - b'0'];
-
+        let mut int_part = (first_char - b'0') as u64;
         loop {
             match self.peek() {
-                Some(c @ b'0'..=b'9') => v.push(c - b'0'),
+                Some(c @ b'0'..=b'9') => int_part = int_part * 10 + (c - b'0') as u64,
                 Some(b'_') => (),
 
                 _ => break,
             }
             self.step();
-        }
-
-        let mut int_part = 0;
-        let mut pow = 1;
-        for c in v.iter().rev() {
-            int_part += *c as u64 * pow;
-            pow *= 10;
         }
 
         if !self.eat(b'.') {
@@ -127,10 +134,15 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
         }
 
         // float
-        v.clear();
+
+        let mut float_part = 0.;
+        let mut pow = 0.1;
         loop {
             match self.peek() {
-                Some(c @ b'0'..=b'9') => v.push(c - b'0'),
+                Some(c @ b'0'..=b'9') => {
+                    float_part += (c - b'0') as f64 * pow;
+                    pow *= 0.1;
+                }
 
                 Some(b'_') => (),
 
@@ -140,14 +152,7 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
             self.step();
         }
 
-        let mut float_part = 0.;
-        let mut pow = 0.1;
-        for c in v.iter() {
-            float_part += *c as f64 * pow;
-            pow *= 0.1;
-        }
-
-        NumberLiteral::Float(int_part as f64 + float_part)
+        NumberLiteral::Real(int_part as f64 + float_part)
     }
 
     fn char_lit(&mut self) -> Result<char, TokenizerError> {
@@ -464,10 +469,21 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
     }
 
     fn get_token(&mut self) -> Result<Token<'s>, TokenizerError> {
-        let t = self.get_token_inner();
-        self.consume();
+        loop {
+            let t = self.get_token_inner();
+            self.consume();
 
-        t
+            match t {
+                Ok(Token {
+                    ty: Ty::Whitespace, ..
+                }) if !self.emit_whitespace => continue,
+                Ok(Token {
+                    ty: Ty::Comment(_), ..
+                }) if !self.emit_comments => continue,
+
+                r => return r,
+            };
+        }
     }
 }
 

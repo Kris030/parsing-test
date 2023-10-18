@@ -1,4 +1,6 @@
-#[derive(Debug, Clone)]
+use std::fmt::Display;
+
+#[derive(Debug, Clone, Copy)]
 pub struct Delimeter {
     pub(crate) ty: DelimeterType,
     pub(crate) side: DelimeterSide,
@@ -14,19 +16,19 @@ impl Delimeter {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum DelimeterType {
     Parentheses,
     Square,
     Curly,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum DelimeterSide {
     Left,
     Right,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Punctuation {
     Semicolon,
     Comma,
@@ -48,19 +50,56 @@ pub enum Literal {
     String(String),
     Char(char),
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum NumberLiteral {
     Integer(u64),
-    Float(f64),
+    Real(f64),
 }
 
-#[derive(Debug, Clone)]
+impl From<u64> for NumberLiteral {
+    fn from(value: u64) -> Self {
+        Self::Integer(value)
+    }
+}
+impl From<f64> for NumberLiteral {
+    fn from(value: f64) -> Self {
+        Self::Real(value)
+    }
+}
+
+impl From<NumberLiteral> for u64 {
+    fn from(value: NumberLiteral) -> u64 {
+        match value {
+            NumberLiteral::Integer(i) => i,
+            NumberLiteral::Real(f) => f as u64,
+        }
+    }
+}
+impl From<NumberLiteral> for f64 {
+    fn from(value: NumberLiteral) -> f64 {
+        match value {
+            NumberLiteral::Integer(i) => i as f64,
+            NumberLiteral::Real(f) => f,
+        }
+    }
+}
+
+impl Display for NumberLiteral {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NumberLiteral::Integer(i) => write!(f, "{i}"),
+            NumberLiteral::Real(r) => write!(f, "{r}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum Comment {
     SingleLine,
     MultiLine,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Operator {
     Plus,
     Minus,
@@ -111,7 +150,7 @@ pub enum Operator {
     // assignment
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Keyword {
     Underscore,
 }
@@ -145,7 +184,7 @@ impl<'s> Token<'s> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TokenPosition<'s> {
     pub(crate) absolute_position: usize,
 

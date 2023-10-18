@@ -1,7 +1,8 @@
 use tokenizer::TokenPosition;
 
-use crate::tokenizer::{Token, TokenType as Ty};
+use crate::parser::Parser;
 
+pub mod parser;
 pub mod tokenizer;
 
 fn main() -> anyhow::Result<()> {
@@ -11,24 +12,29 @@ fn main() -> anyhow::Result<()> {
     let text = std::fs::read_to_string(&file)?;
     let source = Source::new(&file, &text);
 
-    let mut diagnostics = vec![];
-    let tokenizer = tokenizer::Tokenizer::new(source, &mut diagnostics);
+    let mut tokenizer_diagnostics = vec![];
+    let tokenizer = tokenizer::Tokenizer::new(source, &mut tokenizer_diagnostics);
 
-    for t in tokenizer {
-        let comment_or_whitespace = matches!(
-            t,
-            Ok(Token {
-                ty: Ty::Whitespace,
-                ..
-            })
-        );
+    // for t in tokenizer {
+    //     let comment_or_whitespace = matches!(
+    //         t,
+    //         Ok(tokenizer::Token {
+    //             ty: tokenizer::TokenType::Whitespace,
+    //             ..
+    //         })
+    //     );
 
-        if !comment_or_whitespace {
-            println!("{t:?}");
-        }
-    }
+    //     if !comment_or_whitespace {
+    //         println!("{t:?}");
+    //     }
+    // }
 
-    println!("diagnostics: {:?}", diagnostics);
+    let mut parser_diagnostics = vec![];
+    let mut parser = Parser::new(tokenizer, &mut parser_diagnostics);
+
+    println!("{:?}", parser.expr_bp());
+    println!("tokenizer diagnostics: {:?}", tokenizer_diagnostics);
+    println!("parser diagnostics: {:?}", parser_diagnostics);
 
     Ok(())
 }
