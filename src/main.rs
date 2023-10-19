@@ -20,13 +20,8 @@ fn main() -> anyhow::Result<()> {
     let mut parser = parser::Parser::new(tokenizer, &mut parser_diagnostics);
 
     match parser.expr() {
-        Ok(expr) => {
-            println!("\nparsed: {expr}\n");
-        }
-
-        Err(e) => {
-            println!("\nparser error: {e}\n");
-        }
+        Ok(expr) => println!("\nparsed: {expr}\n"),
+        Err(e) => println!("\nparser error: {e}\n"),
     }
 
     println!("tokenizer diagnostics: {:?}", tokenizer_diagnostics);

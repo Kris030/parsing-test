@@ -250,9 +250,17 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
             '@' => Ty::Punctuation(Punctuation::AtSign),
             ',' => Ty::Punctuation(Punctuation::Comma),
             ';' => Ty::Punctuation(Punctuation::Semicolon),
-            ':' => Ty::Punctuation(Punctuation::Colon),
             '#' => Ty::Punctuation(Punctuation::HashSymbol),
             '?' => Ty::Punctuation(Punctuation::QuestionMark),
+
+            ':' => {
+                if self.eat(':') {
+                    Ty::Punctuation(Punctuation::DoubleColon)
+                } else {
+                    Ty::Punctuation(Punctuation::Colon)
+                }
+            }
+
             '$' => {
                 if self.eat('$') {
                     Ty::Punctuation(Punctuation::DoubleDollar)

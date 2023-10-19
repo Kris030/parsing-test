@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Delimeter {
     pub(crate) ty: DelimeterType,
     pub(crate) side: DelimeterSide,
@@ -16,23 +16,24 @@ impl Delimeter {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelimeterType {
     Parentheses,
     Square,
     Curly,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelimeterSide {
     Left,
     Right,
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Punctuation {
     Semicolon,
     Comma,
     Colon,
+    DoubleColon,
     FatArrow,
     Dot,
     DoubleDot,
@@ -44,7 +45,7 @@ pub enum Punctuation {
     DoubleDollar,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Number(NumberLiteral),
     String(String),
@@ -60,7 +61,7 @@ impl Display for Literal {
         }
     }
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NumberLiteral {
     Integer(u64),
     Real(f64),
@@ -103,13 +104,13 @@ impl Display for NumberLiteral {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Comment {
     SingleLine,
     MultiLine,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
     Plus,
     Minus,
@@ -205,7 +206,7 @@ impl Display for Operator {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     Underscore,
     If,
@@ -222,7 +223,7 @@ impl Display for Keyword {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     Identifier,
     Whitespace,

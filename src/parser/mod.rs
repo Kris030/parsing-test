@@ -2,7 +2,7 @@ pub mod expression;
 
 use crate::{tokenizer::*, Diagnostic};
 
-use self::expression::Expression as Expr;
+use self::expression::{Expression as Expr, Path};
 use Operator as Op;
 use ParserError as ParsErr;
 use TokenType as Ty;
@@ -44,6 +44,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
         }
     }
 
+    #[allow(unused)]
     fn next_token(&mut self) -> Result<Option<Token<'s>>, TokenizerError> {
         match self.tokenizer.next() {
             Some(Ok(t)) => Ok(Some(t)),
@@ -51,6 +52,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
             None => Ok(None),
         }
     }
+    #[allow(unused)]
     fn peek_token(&mut self) -> Result<Option<&Token<'s>>, TokenizerError> {
         match self.tokenizer.peek() {
             Some(Ok(t)) => Ok(Some(t)),
@@ -59,11 +61,27 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
         }
     }
 
+    #[allow(unused)]
     fn next_token_ty(&mut self) -> Result<Option<Ty>, TokenizerError> {
         Ok(self.next_token()?.map(|t| t.ty))
     }
+    #[allow(unused)]
     fn peek_token_ty(&mut self) -> Result<Option<&Ty>, TokenizerError> {
         Ok(self.peek_token()?.map(|t| &t.ty))
+    }
+
+    #[allow(unused)]
+    fn eat(&mut self, ty: Ty) -> Result<bool, ParsErr> {
+        let Some(a) = self.peek_token_ty()? else {
+            return Ok(false);
+        };
+
+        let ret = *a == ty;
+        if ret {
+            self.next_token()?;
+        }
+
+        Ok(ret)
     }
 
     fn expr_primary(&mut self) -> Result<Expr<'s>, ParsErr> {
@@ -77,18 +95,60 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
                 t @ Token {
                     ty: Ty::Identifier, ..
                 },
-            ) => {
-                if let Some(Ty::Delimeter(Delimeter {
+            ) => match self.peek_token_ty()? {
+                Some(Ty::Delimeter(Delimeter {
                     ty: DelimeterType::Parentheses,
                     side: DelimeterSide::Left,
-                })) = self.peek_token_ty()?
-                {
+                })) => {
                     self.next_token()?;
-                    self.call_expr(t.text())?
-                } else {
-                    Expr::Var(t)
+                    self.call_expr(Path {
+                        head: t.text(),
+                        tail: None,
+                    })?
                 }
-            }
+
+                Some(Ty::Punctuation(Punctuation::DoubleColon)) => {
+                    self.next_token()?;
+                    let mut tail = vec![];
+
+                    while let Some(Token {
+                        ty: Ty::Identifier, ..
+                    }) = self.peek_token()?
+                    {
+                        tail.push(self.next_token()?.unwrap());
+
+                        if let Some(Ty::Punctuation(Punctuation::DoubleColon)) =
+                            self.peek_token_ty()?
+                        {
+                            self.next_token()?;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    let p = Path {
+                        head: t.text(),
+                        tail: Some(tail),
+                    };
+
+                    match self.peek_token_ty()? {
+                        Some(Ty::Delimeter(Delimeter {
+                            ty: DelimeterType::Parentheses,
+                            side: DelimeterSide::Left,
+                        })) => {
+                            self.next_token()?;
+                            self.call_expr(p)?
+                        }
+
+                        _ => Expr::Name(p),
+                    }
+                }
+
+                _ => Expr::Name(Path {
+                    head: t.text(),
+                    tail: None,
+                }),
+            },
 
             Some(Token {
                 ty:
@@ -240,7 +300,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
         self.expr_bp(0)
     }
 
-    fn call_expr(&mut self, name: &'s str) -> Result<Expr<'s>, ParsErr> {
+    fn call_expr(&mut self, function: Path<'s>) -> Result<Expr<'s>, ParsErr> {
         let mut args = vec![];
 
         loop {
@@ -272,7 +332,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
         }
 
         Ok(Expr::Call {
-            function_name: name,
+            function,
             arguments: args,
         })
     }
