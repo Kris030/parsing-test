@@ -1,6 +1,6 @@
 use tokenizer::TokenPosition;
 
-use crate::parser::Parser;
+use crate::tokenizer::Tokenizer;
 
 pub mod parser;
 pub mod tokenizer;
@@ -12,46 +12,42 @@ fn main() -> anyhow::Result<()> {
     let text = std::fs::read_to_string(&file)?;
     let source = Source::new(&file, &text);
 
+    for t in Tokenizer::new(source, &mut vec![]) {
+        let comment_or_whitespace = matches!(
+            t,
+            Ok(tokenizer::Token {
+                ty: tokenizer::TokenType::Whitespace,
+                ..
+            })
+        );
+
+        if !comment_or_whitespace {
+            println!("{t:?}");
+        }
+    }
+
     let mut tokenizer_diagnostics = vec![];
-    let tokenizer = tokenizer::Tokenizer::new(source, &mut tokenizer_diagnostics);
-
-    // for t in tokenizer {
-    //     let comment_or_whitespace = matches!(
-    //         t,
-    //         Ok(tokenizer::Token {
-    //             ty: tokenizer::TokenType::Whitespace,
-    //             ..
-    //         })
-    //     );
-
-    //     if !comment_or_whitespace {
-    //         println!("{t:?}");
-    //     }
-    // }
+    let tokenizer = Tokenizer::new(source, &mut tokenizer_diagnostics);
 
     let mut parser_diagnostics = vec![];
-    let mut parser = Parser::new(tokenizer, &mut parser_diagnostics);
+    let mut parser = parser::Parser::new(tokenizer, &mut parser_diagnostics);
 
-    println!("{:?}", parser.expr_bp());
+    println!("\nparsed: {:?}\n", parser.expr());
     println!("tokenizer diagnostics: {:?}", tokenizer_diagnostics);
     println!("parser diagnostics: {:?}", parser_diagnostics);
 
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Source<'n, 's> {
     pub(crate) name: &'n str,
     pub(crate) text: &'s str,
-    pub(crate) bin: &'s [u8],
 }
 
 impl<'n, 's> Source<'n, 's> {
     pub fn new(name: &'n str, text: &'s str) -> Self {
-        Self {
-            name,
-            text,
-            bin: text.as_bytes(),
-        }
+        Self { name, text }
     }
 
     pub fn name(&self) -> &str {
