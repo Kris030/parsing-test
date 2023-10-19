@@ -1,6 +1,6 @@
 mod token;
 
-use crate::Diagnostic;
+use crate::{Diagnostic, DiagnosticType};
 
 use super::Source;
 pub use token::{TokenType as Ty, *};
@@ -16,20 +16,23 @@ pub enum TokenizerError {
     #[error("Already done")]
     AlreadyDone,
 
-    #[error("Unexpected byte: {0:#02x} ({})", *.0 as char)]
-    Unexpected(u8),
+    #[error("Unexpected character: {}", *.0)]
+    Unexpected(char),
 }
 
 pub struct Tokenizer<'n, 's, 'd, D> {
     source: Source<'n, 's>,
 
-    done: bool,
+    // done: bool,
+    token_start: usize,
+    token_end: usize,
 
-    pos: usize,
-    lookahead: usize,
+    start_line: usize,
+    start_column: usize,
 
-    line: usize,
-    column: usize,
+    chrs: std::iter::Peekable<std::str::CharIndices<'s>>,
+
+    newlines: Vec<usize>,
 
     diagnostics: &'d mut D,
 
@@ -40,62 +43,54 @@ pub struct Tokenizer<'n, 's, 'd, D> {
 impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
     pub fn new(source: Source<'n, 's>, diagnostics: &'d mut D) -> Self {
         Self {
-            done: source.bin.is_empty(),
-
+            chrs: source.text.char_indices().peekable(),
             source,
 
-            pos: 0,
-            lookahead: 1,
-
-            line: 1,
-            column: 1,
+            newlines: vec![0],
 
             diagnostics,
 
             emit_comments: false,
             emit_whitespace: false,
+
+            token_start: 0,
+            token_end: 0,
+
+            start_line: 1,
+            start_column: 1,
         }
     }
 
     pub fn pos(&self) -> TokenPosition<'s> {
         TokenPosition {
-            absolute_position: self.pos,
-            line: self.line,
-            column: self.column,
-            text: &self.source.text[self.pos..self.lookahead],
+            absolute_position: self.token_start,
+            line: self.start_line,
+            column: self.start_column,
+            text: &self.source.text[self.token_start..=self.token_end],
         }
     }
 
-    fn curr(&self) -> u8 {
-        self.source.bin[self.pos]
-    }
-    fn peek(&self) -> Option<u8> {
-        self.source.bin.get(self.lookahead).copied()
-    }
-    fn peek_next(&mut self) -> Option<u8> {
-        let v = self.peek();
-        self.step();
-        v
-    }
+    fn next_char(&mut self) -> Option<char> {
+        match self.chrs.next() {
+            Some((p, c)) => {
+                if c == '\n' {
+                    self.newlines.push(p);
+                }
+                self.token_end = p;
 
-    fn step(&mut self) {
-        if !self.done {
-            self.lookahead += 1;
-
-            if self.lookahead >= self.source.bin.len() {
-                self.done = true;
+                Some(c)
             }
-        }
-    }
-    fn step_back(&mut self) {
-        if self.lookahead > self.pos {
-            self.lookahead -= 1;
+            None => None,
         }
     }
 
-    fn eat(&mut self, v: u8) -> bool {
-        if self.peek() == Some(v) {
-            self.step();
+    fn peek_char(&mut self) -> Option<char> {
+        self.chrs.peek().map(|(_, c)| *c)
+    }
+
+    fn eat(&mut self, v: char) -> bool {
+        if self.peek_char() == Some(v) {
+            self.next_char();
             true
         } else {
             false
@@ -103,33 +98,27 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
     }
 
     fn consume(&mut self) {
-        for p in self.pos..=usize::min(self.lookahead, self.source.bin.len() - 1) {
-            if self.source.bin[p] == b'\n' {
-                self.line += 1;
-                self.column = 1;
-            } else {
-                self.column += 1;
-            }
-        }
+        self.token_start = self.token_end + 1;
+        self.token_end = self.token_start;
 
-        self.pos = self.lookahead;
-        self.done = self.pos >= self.source.bin.len();
-        self.lookahead += 1;
+        self.start_line = self.newlines.len();
+        self.start_column = self.token_end - self.newlines.last().unwrap();
     }
 
-    fn number(&mut self, first_char: u8) -> NumberLiteral {
-        let mut int_part = (first_char - b'0') as u64;
+    fn number(&mut self, first_char: char) -> NumberLiteral {
+        let mut int_part = first_char as u64 - '0' as u64;
         loop {
-            match self.peek() {
-                Some(c @ b'0'..=b'9') => int_part = int_part * 10 + (c - b'0') as u64,
-                Some(b'_') => (),
+            match self.peek_char() {
+                Some(c @ '0'..='9') => int_part = int_part * 10 + (c as u64 - '0' as u64),
+                Some('_') => (),
 
                 _ => break,
             }
-            self.step();
+
+            self.next_char();
         }
 
-        if !self.eat(b'.') {
+        if !self.eat('.') {
             return NumberLiteral::Integer(int_part);
         }
 
@@ -138,38 +127,30 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
         let mut float_part = 0.;
         let mut pow = 0.1;
         loop {
-            match self.peek() {
-                Some(c @ b'0'..=b'9') => {
-                    float_part += (c - b'0') as f64 * pow;
+            match self.peek_char() {
+                Some(c @ '0'..='9') => {
+                    float_part += (c as u8 - b'0') as f64 * pow;
                     pow *= 0.1;
                 }
 
-                Some(b'_') => (),
+                Some('_') => (),
 
                 _ => break,
             }
 
-            self.step();
+            self.next_char();
         }
 
         NumberLiteral::Real(int_part as f64 + float_part)
     }
 
     fn char_lit(&mut self) -> Result<char, TokenizerError> {
-        let c = match self.peek().ok_or(TokenizerError::UnfinishedChar)? {
-            b'\\' => {
-                self.step();
-                self.peek_next().ok_or(TokenizerError::UnfinishedChar)? as char
-            }
-
-            c => {
-                self.step();
-
-                c as char
-            }
+        let c = match self.next_char().ok_or(TokenizerError::UnfinishedChar)? {
+            '\\' => self.peek_char().ok_or(TokenizerError::UnfinishedChar)?,
+            c => c,
         };
 
-        if self.eat(b'\'') {
+        if self.eat('\'') {
             Ok(c)
         } else {
             Err(TokenizerError::UnfinishedChar)
@@ -181,47 +162,47 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
         let mut escaped = false;
 
         loop {
-            match self.peek_next().ok_or(TokenizerError::UnfinishedString)? {
-                b'"' if !escaped => break,
-                b'\\' if !escaped => escaped = true,
+            match self.peek_char().ok_or(TokenizerError::UnfinishedString)? {
+                '"' if !escaped => break,
+                '\\' if !escaped => escaped = true,
 
                 c if escaped => {
                     if let Some(escaped) = escape(c) {
                         s.push_str(escaped);
                     } else {
-                        s.push(c as char);
+                        s.push(c);
                     }
 
                     escaped = false;
                 }
 
-                c => s.push(c as char),
+                c => s.push(c),
             }
         }
 
         Ok(s)
     }
 
-    fn multiline_comment(&mut self) -> Comment {
-        self.step();
-
-        let Some(mut pc) = self.peek_next() else {
-            return Comment::MultiLine;
+    fn multiline_comment(&mut self) -> bool {
+        let Some(mut pc) = self.next_char() else {
+            return false;
         };
+
         let mut nest = 1usize;
 
         let mut closed = false;
-        while let Some(c) = self.peek_next() {
+        while let Some(c) = self.next_char() {
             match (pc, c) {
-                (b'*', b'/') => {
+                ('*', '/') => {
                     nest -= 1;
+
                     if nest == 0 {
                         closed = true;
                         break;
                     }
                 }
 
-                (b'/', b'*') => nest += 1,
+                ('/', '*') => nest += 1,
 
                 _ => (),
             }
@@ -229,80 +210,73 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
             pc = c;
         }
 
-        if !closed {
-            self.diagnostics.extend([Diagnostic::new(
-                crate::DiagnosticType::UnclosedMultilineComment,
-                self.pos(),
-            )]);
-        }
-
-        Comment::MultiLine
+        closed
     }
-    fn singleline_comment(&mut self) -> Comment {
-        while self.peek() != Some(b'\n') {
-            self.step();
+    fn singleline_comment(&mut self) {
+        while self.peek_char() != Some('\n') {
+            self.next_char();
         }
-        Comment::SingleLine
     }
 
-    fn get_token_inner(&mut self) -> Result<Token<'s>, TokenizerError> {
-        if self.done {
-            return Err(TokenizerError::AlreadyDone);
-        }
-
-        let ty = match self.curr() {
-            b'(' => Ty::Delimeter(Delimeter {
+    fn get_token_inner(&mut self) -> Option<TokenizerItem<'s>> {
+        let ty = match self.next_char()? {
+            '(' => Ty::Delimeter(Delimeter {
                 side: DelimeterSide::Left,
                 ty: DelimeterType::Parentheses,
             }),
-            b')' => Ty::Delimeter(Delimeter {
+            ')' => Ty::Delimeter(Delimeter {
                 side: DelimeterSide::Right,
                 ty: DelimeterType::Parentheses,
             }),
-            b'[' => Ty::Delimeter(Delimeter {
+
+            '[' => Ty::Delimeter(Delimeter {
                 side: DelimeterSide::Left,
                 ty: DelimeterType::Square,
             }),
-            b']' => Ty::Delimeter(Delimeter {
+            ']' => Ty::Delimeter(Delimeter {
                 side: DelimeterSide::Right,
                 ty: DelimeterType::Square,
             }),
-            b'{' => Ty::Delimeter(Delimeter {
+
+            '{' => Ty::Delimeter(Delimeter {
                 side: DelimeterSide::Left,
                 ty: DelimeterType::Curly,
             }),
-            b'}' => Ty::Delimeter(Delimeter {
+            '}' => Ty::Delimeter(Delimeter {
                 side: DelimeterSide::Right,
                 ty: DelimeterType::Curly,
             }),
 
-            b'@' => Ty::Punctuation(Punctuation::AtSign),
-            b',' => Ty::Punctuation(Punctuation::Colon),
-            b';' => Ty::Punctuation(Punctuation::Semicolon),
-            b':' => Ty::Punctuation(Punctuation::Colon),
-            b'#' => Ty::Punctuation(Punctuation::HashSymbol),
-            b'?' => Ty::Punctuation(Punctuation::QuestionMark),
-            b'$' => {
-                if self.eat(b'$') {
+            '@' => Ty::Punctuation(Punctuation::AtSign),
+            ',' => Ty::Punctuation(Punctuation::Colon),
+            ';' => Ty::Punctuation(Punctuation::Semicolon),
+            ':' => Ty::Punctuation(Punctuation::Colon),
+            '#' => Ty::Punctuation(Punctuation::HashSymbol),
+            '?' => Ty::Punctuation(Punctuation::QuestionMark),
+            '$' => {
+                if self.eat('$') {
                     Ty::Punctuation(Punctuation::DoubleDollar)
                 } else {
                     Ty::Punctuation(Punctuation::Dollar)
                 }
             }
 
-            b'=' => match self.peek_next() {
-                Some(b'>') => Ty::Punctuation(Punctuation::FatArrow),
-                Some(b'=') => Ty::Operator(Operator::DoubleEquals),
-
-                _ => {
-                    self.step_back();
-                    Ty::Operator(Operator::Equals)
+            '=' => match self.peek_char() {
+                Some('>') => {
+                    self.next_char();
+                    Ty::Punctuation(Punctuation::FatArrow)
                 }
+                Some('=') => {
+                    self.next_char();
+                    Ty::Operator(Operator::DoubleEquals)
+                }
+
+                _ => Ty::Operator(Operator::Equals),
             },
 
-            b'.' => {
-                if self.eat(b'.') {
-                    if self.eat(b'.') {
+            '.' => {
+                if self.eat('.') {
+                    if self.eat('.') {
                         Ty::Punctuation(Punctuation::TripleDot)
                     } else {
                         Ty::Punctuation(Punctuation::DoubleDot)
@@ -312,20 +286,20 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
                 }
             }
 
-            b' ' | b'\t' | b'\n' => {
-                while matches!(self.peek(), Some(b' ' | b'\t' | b'\n')) {
-                    self.step();
+            ' ' | '\t' | '\n' => {
+                while matches!(self.peek_char(), Some(' ' | '\t' | '\n')) {
+                    self.next_char();
                 }
 
                 Ty::Whitespace
             }
 
-            b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+            'a'..='z' | 'A'..='Z' | '_' => {
                 while matches!(
-                    self.peek(),
-                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'0'..=b'9')
+                    self.peek_char(),
+                    Some('a'..='z' | 'A'..='Z' | '_' | '0'..='9')
                 ) {
-                    self.step();
+                    self.next_char();
                 }
 
                 get_keyword(self.pos().text)
@@ -333,153 +307,216 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
                     .unwrap_or(Ty::Identifier)
             }
 
-            c @ b'0'..=b'9' => Ty::Literal(Literal::Number(self.number(c))),
+            c @ '0'..='9' => Ty::Literal(Literal::Number(self.number(c))),
 
-            b'\'' => Ty::Literal(Literal::Char(self.char_lit()?)),
-            b'\"' => Ty::Literal(Literal::String(self.string_lit()?)),
+            '\'' => Ty::Literal(Literal::Char(match self.char_lit() {
+                Ok(c) => c,
+                Err(e) => return Some(Err(e)),
+            })),
 
-            b'+' => match self.peek() {
-                Some(b'=') => Ty::Operator(Operator::PlusEquals),
-                Some(b'+') => Ty::Operator(Operator::DoublePlus),
+            '\"' => Ty::Literal(Literal::String(match self.string_lit() {
+                Ok(c) => c,
+                Err(e) => return Some(Err(e)),
+            })),
+
+            '+' => match self.peek_char() {
+                Some('=') => {
+                    self.next_char();
+                    Ty::Operator(Operator::PlusEquals)
+                }
+
+                Some('+') => {
+                    self.next_char();
+                    Ty::Operator(Operator::DoublePlus)
+                }
                 _ => Ty::Operator(Operator::Plus),
             },
-            b'-' => match self.peek() {
-                Some(b'=') => Ty::Operator(Operator::MinusEquals),
-                Some(b'-') => Ty::Operator(Operator::DoubleMinus),
+
+            '-' => match self.peek_char() {
+                Some('=') => {
+                    self.next_char();
+                    Ty::Operator(Operator::MinusEquals)
+                }
+
+                Some('-') => {
+                    self.next_char();
+                    Ty::Operator(Operator::DoubleMinus)
+                }
                 _ => Ty::Operator(Operator::Minus),
             },
-            b'*' => match self.peek() {
-                Some(b'=') => Ty::Operator(Operator::StarEquals),
-                Some(b'*') => {
-                    self.step();
-                    if self.eat(b'=') {
+            '*' => match self.peek_char() {
+                Some('=') => {
+                    self.next_char();
+                    Ty::Operator(Operator::StarEquals)
+                }
+
+                Some('*') => {
+                    self.next_char();
+                    if self.eat('=') {
                         Ty::Operator(Operator::DoubleStarEquals)
                     } else {
                         Ty::Operator(Operator::DoubleStar)
                     }
                 }
+
                 _ => Ty::Operator(Operator::Star),
             },
-            b'!' => {
-                if self.eat(b'=') {
+
+            '!' => {
+                if self.eat('=') {
                     Ty::Operator(Operator::BangEquals)
                 } else {
                     Ty::Operator(Operator::Bang)
                 }
             }
-            b'~' => {
-                if self.eat(b'=') {
+
+            '~' => {
+                if self.eat('=') {
                     Ty::Operator(Operator::TildaEquals)
                 } else {
                     Ty::Operator(Operator::Tilda)
                 }
             }
-            b'^' => {
-                if self.eat(b'=') {
+
+            '^' => {
+                if self.eat('=') {
                     Ty::Operator(Operator::CaretEquals)
                 } else {
                     Ty::Operator(Operator::Caret)
                 }
             }
-            b'%' => {
-                if self.eat(b'=') {
+
+            '%' => {
+                if self.eat('=') {
                     Ty::Operator(Operator::PercentEquals)
                 } else {
                     Ty::Operator(Operator::Percent)
                 }
             }
 
-            b'/' => match self.peek() {
-                Some(b'*') => Ty::Comment(self.multiline_comment()),
-                Some(b'/') => Ty::Comment(self.singleline_comment()),
+            '/' => match self.peek_char() {
+                Some('*') => {
+                    let closed = self.multiline_comment();
 
-                Some(b'=') => Ty::Operator(Operator::SlashEquals),
+                    if !closed {
+                        self.diagnostics.extend([Diagnostic::new(
+                            DiagnosticType::UnclosedMultilineComment,
+                            self.pos(),
+                        )]);
+                    }
+
+                    Ty::Comment(Comment::MultiLine)
+                }
+
+                Some('/') => {
+                    self.singleline_comment();
+                    Ty::Comment(Comment::SingleLine)
+                }
+
+                Some('=') => {
+                    self.next_char();
+                    Ty::Operator(Operator::SlashEquals)
+                }
 
                 _ => Ty::Operator(Operator::Slash),
             },
 
-            b'&' => match self.peek() {
-                Some(b'&') => {
-                    self.step();
-                    if self.eat(b'=') {
+            '&' => match self.peek_char() {
+                Some('&') => {
+                    self.next_char();
+                    if self.eat('=') {
                         Ty::Operator(Operator::DoubleAndEquals)
                     } else {
                         Ty::Operator(Operator::DoubleAnd)
                     }
                 }
-                Some(b'=') => TokenType::Operator(Operator::SingleAndEquals),
+
+                Some('=') => {
+                    self.next_char();
+                    TokenType::Operator(Operator::SingleAndEquals)
+                }
+
                 _ => Ty::Operator(Operator::SingleAnd),
             },
-            b'|' => match self.peek() {
-                Some(b'|') => {
-                    self.step();
-                    if self.eat(b'=') {
+
+            '|' => match self.peek_char() {
+                Some('|') => {
+                    self.next_char();
+                    if self.eat('=') {
                         Ty::Operator(Operator::DoubleOrEquals)
                     } else {
                         Ty::Operator(Operator::DoubleOr)
                     }
                 }
-                Some(b'=') => TokenType::Operator(Operator::SingleOrEquals),
+
+                Some('=') => {
+                    self.next_char();
+                    TokenType::Operator(Operator::SingleOrEquals)
+                }
+
                 _ => Ty::Operator(Operator::SingleOr),
             },
 
-            b'<' => match self.peek_next() {
-                Some(b'=') => Ty::Operator(Operator::LesserThanEquals),
+            '<' => match self.peek_char() {
+                Some('=') => {
+                    self.next_char();
+                    Ty::Operator(Operator::LesserThanEquals)
+                }
 
-                Some(b'<') => {
-                    if self.peek() == Some(b'=') {
-                        self.step();
+                Some('<') => {
+                    self.next_char();
+                    if self.peek_char() == Some('=') {
+                        self.next_char();
                         Ty::Operator(Operator::LeftShiftEquals)
                     } else {
                         Ty::Operator(Operator::LeftShift)
                     }
                 }
 
-                _ => {
-                    self.step_back();
-                    Ty::Operator(Operator::LesserThan)
-                }
+                _ => Ty::Operator(Operator::LesserThan),
             },
 
-            b'>' => match self.peek_next() {
-                Some(b'=') => Ty::Operator(Operator::GreaterThanEquals),
+            '>' => match self.peek_char() {
+                Some('=') => {
+                    self.next_char();
+                    Ty::Operator(Operator::GreaterThanEquals)
+                }
 
-                Some(b'>') => {
-                    if self.peek() == Some(b'=') {
-                        self.step();
+                Some('>') => {
+                    self.next_char();
+                    if self.peek_char() == Some('=') {
+                        self.next_char();
                         Ty::Operator(Operator::RightShiftEquals)
                     } else {
                         Ty::Operator(Operator::RightShift)
                     }
                 }
 
-                _ => {
-                    self.step_back();
-                    Ty::Operator(Operator::GreaterThan)
-                }
+                _ => Ty::Operator(Operator::GreaterThan),
             },
 
-            b => return Err(TokenizerError::Unexpected(b)),
+            b => return Some(Err(TokenizerError::Unexpected(b))),
         };
 
-        Ok(Token {
+        Some(Ok(Token {
             position: self.pos(),
             ty,
-        })
+        }))
     }
 
-    fn get_token(&mut self) -> Result<Token<'s>, TokenizerError> {
+    fn get_token(&mut self) -> Option<TokenizerItem<'s>> {
         loop {
             let t = self.get_token_inner();
             self.consume();
 
             match t {
-                Ok(Token {
+                Some(Ok(Token {
                     ty: Ty::Whitespace, ..
-                }) if !self.emit_whitespace => continue,
-                Ok(Token {
+                })) if !self.emit_whitespace => continue,
+
+                Some(Ok(Token {
                     ty: Ty::Comment(_), ..
-                }) if !self.emit_comments => continue,
+                })) if !self.emit_comments => continue,
 
                 r => return r,
             };
@@ -487,23 +524,21 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
     }
 }
 
+pub type TokenizerItem<'s> = Result<Token<'s>, TokenizerError>;
+
 impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Iterator for Tokenizer<'n, 's, 'd, D> {
-    type Item = Result<Token<'s>, TokenizerError>;
+    type Item = TokenizerItem<'s>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-
-        Some(self.get_token())
+        self.get_token()
     }
 }
 
-fn escape(c: u8) -> Option<&'static str> {
+fn escape(c: char) -> Option<&'static str> {
     Some(match c {
-        b'n' => "\n",
-        b't' => "\t",
-        b'0' => "\0",
+        'n' => "\n",
+        't' => "\t",
+        '0' => "\0",
 
         _ => return None,
     })

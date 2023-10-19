@@ -50,6 +50,16 @@ pub enum Literal {
     String(String),
     Char(char),
 }
+
+impl Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Literal::Number(n) => write!(f, "{n}"),
+            Literal::String(s) => write!(f, "\"{s}\""),
+            Literal::Char(c) => write!(f, "'{c}'"),
+        }
+    }
+}
 #[derive(Debug, Clone, Copy)]
 pub enum NumberLiteral {
     Integer(u64),
@@ -148,6 +158,51 @@ pub enum Operator {
     LeftShiftEquals,
     RightShiftEquals,
     // assignment
+}
+
+impl Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Plus => write!(f, "+"),
+            Self::Minus => write!(f, "-"),
+            Self::DoublePlus => write!(f, "++"),
+            Self::DoubleMinus => write!(f, "--"),
+            Self::Tilda => write!(f, "~"),
+            Self::Bang => write!(f, "!"),
+            Self::Star => write!(f, "*"),
+            Self::Slash => write!(f, "/"),
+            Self::BangEquals => write!(f, "!="),
+            Self::RightShift => write!(f, ">>"),
+            Self::LesserThan => write!(f, "<"),
+            Self::DoubleStar => write!(f, "**"),
+            Self::DoubleAnd => write!(f, "&&"),
+            Self::DoubleOr => write!(f, "||"),
+            Self::DoubleEquals => write!(f, "=="),
+            Self::GreaterThan => write!(f, ">"),
+            Self::Caret => write!(f, "^"),
+            Self::Percent => write!(f, "%"),
+            Self::SingleAnd => write!(f, "&"),
+            Self::SingleOr => write!(f, "|"),
+            Self::LeftShift => write!(f, "<<"),
+            Self::Equals => write!(f, "="),
+            Self::PlusEquals => write!(f, "+="),
+            Self::MinusEquals => write!(f, "-="),
+            Self::StarEquals => write!(f, "*="),
+            Self::SlashEquals => write!(f, "/="),
+            Self::TildaEquals => write!(f, "~="),
+            Self::DoubleStarEquals => write!(f, "**="),
+            Self::DoubleAndEquals => write!(f, "&&="),
+            Self::DoubleOrEquals => write!(f, "||="),
+            Self::LesserThanEquals => write!(f, "<="),
+            Self::GreaterThanEquals => write!(f, ">="),
+            Self::CaretEquals => write!(f, "^="),
+            Self::PercentEquals => write!(f, "%="),
+            Self::SingleAndEquals => write!(f, "&="),
+            Self::SingleOrEquals => write!(f, "|="),
+            Self::LeftShiftEquals => write!(f, "<<="),
+            Self::RightShiftEquals => write!(f, ">>="),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
