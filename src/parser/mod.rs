@@ -101,10 +101,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
                     side: DelimeterSide::Left,
                 })) => {
                     self.next_token()?;
-                    self.call_expr(Path {
-                        head: t.text(),
-                        tail: None,
-                    })?
+                    self.call_expr(Path::new(t.text(), None))?
                 }
 
                 Some(Ty::Punctuation(Punctuation::DoubleColon)) => {
@@ -126,10 +123,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
                         }
                     }
 
-                    let p = Path {
-                        head: t.text(),
-                        tail: Some(tail),
-                    };
+                    let p = Path::new(t.text(), Some(tail));
 
                     match self.peek_token_ty()? {
                         Some(Ty::Delimeter(Delimeter {
@@ -144,10 +138,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
                     }
                 }
 
-                _ => Expr::Name(Path {
-                    head: t.text(),
-                    tail: None,
-                }),
+                _ => Expr::Name(Path::new(t.text(), None)),
             },
 
             Some(Token {
@@ -206,20 +197,15 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
     fn expr_bp(&mut self, min_bp: u8) -> Result<Expr<'s>, ParsErr> {
         let mut lhs = self.expr_primary()?;
 
-        #[allow(clippy::while_let_loop)]
-        loop {
-            let op = match self.peek_token_ty()? {
-                Some(
-                    op @ (Ty::Operator(_)
-                    | Ty::Delimeter(Delimeter {
-                        ty: DelimeterType::Square,
-                        ..
-                    })),
-                ) => op.clone(),
-
-                _ => break,
-                // Some(ty) => return Err(ParsErr::unexpected(Some(ty.clone()), "an operator")),
-            };
+        while let Some(
+            op @ (Ty::Operator(_)
+            | Ty::Delimeter(Delimeter {
+                ty: DelimeterType::Square,
+                ..
+            })),
+        ) = self.peek_token_ty()?
+        {
+            let op = op.clone();
 
             if let Some((l_bp, ())) = postfix_binding_power(&op) {
                 if l_bp < min_bp {

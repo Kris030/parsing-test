@@ -8,6 +8,12 @@ pub struct Path<'s> {
     pub(crate) tail: Option<Vec<Token<'s>>>,
 }
 
+impl<'s> Path<'s> {
+    pub fn new(head: &'s str, tail: Option<Vec<Token<'s>>>) -> Self {
+        Self { head, tail }
+    }
+}
+
 impl Display for Path<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.head)?;
