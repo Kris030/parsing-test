@@ -208,6 +208,18 @@ impl Display for Operator {
 #[derive(Debug, Clone, Copy)]
 pub enum Keyword {
     Underscore,
+    If,
+    Else,
+    Break,
+    Continue,
+    Return,
+    Fn,
+}
+
+impl Display for Keyword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", get_keyword_str(self))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -237,6 +249,9 @@ impl<'s> Token<'s> {
     pub fn ty(&self) -> &TokenType {
         &self.ty
     }
+    pub fn text(&self) -> &'s str {
+        self.position.text
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -263,9 +278,30 @@ impl<'s> TokenPosition<'s> {
     }
 }
 
-pub(crate) fn get_keyword(s: &str) -> Option<Keyword> {
-    Some(match s {
-        "_" => Keyword::Underscore,
-        _ => return None,
-    })
+macro_rules! kws {
+    ($($ss:literal => $kw:path),+ $(,)?) => {
+        pub(crate) fn get_keyword(s: &str) -> Option<Keyword> {
+            Some(match s {
+                $($ss => $kw),+,
+
+                _ => return None,
+            })
+        }
+
+        pub(crate) fn get_keyword_str(k: &Keyword) -> &'static str {
+            match k {
+                $($kw => $ss),+
+            }
+        }
+    };
 }
+
+kws!(
+    "_" => Keyword::Underscore,
+    "continue" => Keyword::Continue,
+    "return" => Keyword::Return,
+    "break" => Keyword::Break,
+    "else" => Keyword::Else,
+    "if" => Keyword::If,
+    "fn" => Keyword::Fn,
+);

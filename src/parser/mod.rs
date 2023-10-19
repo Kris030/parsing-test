@@ -59,8 +59,15 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
         }
     }
 
-    fn expr_bp(&mut self, min_bp: u8) -> Result<Expr<'s>, ParsErr> {
-        let mut lhs = match self.next_token()? {
+    fn next_token_ty(&mut self) -> Result<Option<Ty>, TokenizerError> {
+        Ok(self.next_token()?.map(|t| t.ty))
+    }
+    fn peek_token_ty(&mut self) -> Result<Option<&Ty>, TokenizerError> {
+        Ok(self.peek_token()?.map(|t| &t.ty))
+    }
+
+    fn expr_primary(&mut self) -> Result<Expr<'s>, ParsErr> {
+        Ok(match self.next_token()? {
             Some(Token {
                 ty: Ty::Literal(value),
                 ..
@@ -70,7 +77,18 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
                 t @ Token {
                     ty: Ty::Identifier, ..
                 },
-            ) => Expr::Var(t),
+            ) => {
+                if let Some(Ty::Delimeter(Delimeter {
+                    ty: DelimeterType::Parentheses,
+                    side: DelimeterSide::Left,
+                })) = self.peek_token_ty()?
+                {
+                    self.next_token()?;
+                    self.call_expr(t.text())?
+                } else {
+                    Expr::Var(t)
+                }
+            }
 
             Some(Token {
                 ty:
@@ -82,7 +100,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
             }) => {
                 let lhs = self.expr_bp(0)?;
 
-                match self.next_token()?.map(|t| t.ty) {
+                match self.next_token_ty()? {
                     Some(Ty::Delimeter(Delimeter {
                         ty: DelimeterType::Parentheses,
                         side: DelimeterSide::Right,
@@ -120,11 +138,17 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
                     "a literal or an identifier",
                 ))
             }
-            None => return Err(ParsErr::UnexpectedEnd),
-        };
 
+            None => return Err(ParsErr::UnexpectedEnd),
+        })
+    }
+
+    fn expr_bp(&mut self, min_bp: u8) -> Result<Expr<'s>, ParsErr> {
+        let mut lhs = self.expr_primary()?;
+
+        #[allow(clippy::while_let_loop)]
         loop {
-            let op = match self.peek_token()?.map(|t| &t.ty) {
+            let op = match self.peek_token_ty()? {
                 Some(
                     op @ (Ty::Operator(_)
                     | Ty::Delimeter(Delimeter {
@@ -133,9 +157,8 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
                     })),
                 ) => op.clone(),
 
-                None => break,
-
-                Some(ty) => return Err(ParsErr::unexpected(Some(ty.clone()), "an operator")),
+                _ => break,
+                // Some(ty) => return Err(ParsErr::unexpected(Some(ty.clone()), "an operator")),
             };
 
             if let Some((l_bp, ())) = postfix_binding_power(&op) {
@@ -154,7 +177,7 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
                 ) {
                     let rhs = self.expr_bp(0)?;
 
-                    match self.next_token()?.map(|t| t.ty) {
+                    match self.next_token_ty()? {
                         Some(Ty::Delimeter(Delimeter {
                             ty: DelimeterType::Square,
                             side: DelimeterSide::Right,
@@ -215,6 +238,43 @@ impl<'s, 'd, T: Iterator<Item = TokenizerItem<'s>>, D: Extend<Diagnostic<'s>>>
 
     pub fn expr(&mut self) -> Result<Expr<'s>, ParserError> {
         self.expr_bp(0)
+    }
+
+    fn call_expr(&mut self, name: &'s str) -> Result<Expr<'s>, ParsErr> {
+        let mut args = vec![];
+
+        loop {
+            let arg = self.expr()?;
+            args.push(arg);
+
+            match self.peek_token_ty()? {
+                Some(Ty::Delimeter(Delimeter {
+                    ty: DelimeterType::Parentheses,
+                    side: DelimeterSide::Right,
+                })) => {
+                    self.next_token()?;
+                    break;
+                }
+
+                Some(Ty::Punctuation(Punctuation::Comma)) => {
+                    self.next_token()?;
+                    continue;
+                }
+
+                ty => {
+                    return Err(ParserError::Unexpected {
+                        found: ty.cloned(),
+                        expected:
+                            "a comma after the argument, or a parenthesis closing the agument list",
+                    })
+                }
+            }
+        }
+
+        Ok(Expr::Call {
+            function_name: name,
+            arguments: args,
+        })
     }
 }
 

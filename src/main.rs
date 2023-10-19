@@ -12,6 +12,30 @@ fn main() -> anyhow::Result<()> {
     let text = std::fs::read_to_string(&file)?;
     let source = Source::new(&file, &text);
 
+    // print_tokens(source);
+
+    let mut parser_diagnostics = vec![];
+    let mut tokenizer_diagnostics = vec![];
+    let tokenizer = Tokenizer::new(source, &mut tokenizer_diagnostics);
+    let mut parser = parser::Parser::new(tokenizer, &mut parser_diagnostics);
+
+    match parser.expr() {
+        Ok(expr) => {
+            println!("\nparsed: {expr}\n");
+        }
+
+        Err(e) => {
+            println!("\nparser error: {e}\n");
+        }
+    }
+
+    println!("tokenizer diagnostics: {:?}", tokenizer_diagnostics);
+    println!("parser diagnostics: {:?}", parser_diagnostics);
+
+    Ok(())
+}
+
+pub fn print_tokens(source: Source<'_, '_>) {
     for t in Tokenizer::new(source, &mut vec![]) {
         let comment_or_whitespace = matches!(
             t,
@@ -25,18 +49,6 @@ fn main() -> anyhow::Result<()> {
             println!("{t:?}");
         }
     }
-
-    let mut tokenizer_diagnostics = vec![];
-    let tokenizer = Tokenizer::new(source, &mut tokenizer_diagnostics);
-
-    let mut parser_diagnostics = vec![];
-    let mut parser = parser::Parser::new(tokenizer, &mut parser_diagnostics);
-
-    println!("\nparsed: {:?}\n", parser.expr());
-    println!("tokenizer diagnostics: {:?}", tokenizer_diagnostics);
-    println!("parser diagnostics: {:?}", parser_diagnostics);
-
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]

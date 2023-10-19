@@ -248,7 +248,7 @@ impl<'n, 's, 'd, D: Extend<Diagnostic<'s>>> Tokenizer<'n, 's, 'd, D> {
             }),
 
             '@' => Ty::Punctuation(Punctuation::AtSign),
-            ',' => Ty::Punctuation(Punctuation::Colon),
+            ',' => Ty::Punctuation(Punctuation::Comma),
             ';' => Ty::Punctuation(Punctuation::Semicolon),
             ':' => Ty::Punctuation(Punctuation::Colon),
             '#' => Ty::Punctuation(Punctuation::HashSymbol),
